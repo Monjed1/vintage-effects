@@ -146,4 +146,25 @@ You can test the API using curl:
 curl -X POST http://your-server-ip:5557/api/url/apply-effect \
   -H "Content-Type: application/json" \
   -d '{"video_url": "https://example.com/path/to/video.mp4", "effect": "vhs", "intensity": 0.7}'
-``` 
+```
+
+## Deployment Instructions
+
+To deploy this API on your VPS:
+
+1. Transfer all the files to your VPS:
+   ```
+   app.py
+   Ventageeffect.py
+   requirements.txt
+   deploy.sh
+   templates/index.html
+   ```
+
+2. Make the deployment script executable and run it:
+   ```bash
+   chmod +x deploy.sh
+   ./deploy.sh
+   ```
+
+3. The server will start on port 5557 

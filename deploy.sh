@@ -21,6 +21,12 @@ export SERVER_HOST="0.0.0.0"
 export SERVER_PORT="5557"
 export SERVER_BASE_URL="http://62.171.168.74:5557"
 
+# Check required files
+if [ ! -f "app.py" ] || [ ! -f "Ventageeffect.py" ]; then
+    echo "Error: Required files are missing. Make sure app.py and Ventageeffect.py exist."
+    exit 1
+fi
+
 # Start server with gunicorn
 echo "Starting server on port 5557..."
 nohup gunicorn --bind 0.0.0.0:5557 --workers 4 app:app > logs/vintage_effects.log 2>&1 &

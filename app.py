@@ -10,7 +10,7 @@ import uuid
 import requests
 from urllib.parse import urlparse
 import werkzeug.serving
-from effects import (
+from Ventageeffect import (
     apply_vhs_effect, 
     apply_crt_scanlines, 
     apply_film_grain, 
