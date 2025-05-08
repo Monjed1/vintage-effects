@@ -9,54 +9,105 @@ from skimage.util import random_noise
 def process_video_frames(input_path, output_path, process_frame_func, audio=True, **kwargs):
     """
     Generic function for processing video frames with a given effect function
+    Using OpenCV to process frames directly
     """
+    temp_output = None
     try:
-        # Load the video
-        clip = VideoFileClip(input_path)
-        
-        # Extract all frames first, then process them
-        # This avoids any issues with how iter_frames passes arguments
-        all_frames = []
-        duration = clip.duration
-        fps = clip.fps
-        total_frames = int(duration * fps)
-        
-        # Extract frames at specific timestamps
-        for i in range(total_frames):
-            timestamp = i / fps
-            if timestamp <= duration:
-                frame = clip.get_frame(timestamp)
-                all_frames.append(frame)
-        
-        # Process frames separately
-        processed_frames = []
-        for frame in all_frames:
+        # Extract audio from original if needed
+        original_audio = None
+        if audio:
             try:
-                # Apply the effect with explicit keyword arguments
-                processed_frame = process_frame_func(frame, **kwargs)
-                processed_frames.append(processed_frame)
+                original_clip = VideoFileClip(input_path)
+                if original_clip.audio is not None:
+                    original_audio = original_clip.audio
+                original_clip.close()
             except Exception as e:
-                # Try without kwargs if that fails
-                try:
-                    processed_frame = process_frame_func(frame)
-                    processed_frames.append(processed_frame)
-                except Exception as inner_e:
-                    raise Exception(f"Error processing frame: {str(inner_e)}")
+                print(f"Warning: Could not extract audio: {str(e)}")
         
-        # Create a new clip from processed frames
-        processed_clip = ImageSequenceClip(processed_frames, fps=fps)
+        # Load video with OpenCV for frame extraction
+        video = cv2.VideoCapture(input_path)
         
-        # Write the result to the output file
-        if audio and clip.audio is not None:
-            processed_clip = processed_clip.set_audio(clip.audio)
+        if not video.isOpened():
+            raise Exception("Could not open video file")
         
-        processed_clip.write_videofile(output_path, codec='libx264', audio_codec='aac' if audio else None)
+        # Get video properties
+        frame_width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = video.get(cv2.CAP_PROP_FPS)
         
-        # Close the clips to release resources
-        clip.close()
-        processed_clip.close()
+        # Create a temporary file for processed frames
+        temp_output = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
         
+        # Create VideoWriter
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(temp_output, fourcc, fps, (frame_width, frame_height))
+        
+        # Process frames
+        while True:
+            ret, frame = video.read()
+            if not ret:
+                break
+                
+            # OpenCV uses BGR, convert to RGB for consistency with moviepy
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Process the frame
+            try:
+                processed_frame = process_frame_func(frame_rgb, **kwargs)
+            except TypeError:
+                # If that fails, try without kwargs
+                processed_frame = process_frame_func(frame_rgb)
+                
+            # Convert back to BGR for OpenCV
+            processed_frame_bgr = cv2.cvtColor(processed_frame, cv2.COLOR_RGB2BGR)
+            
+            # Write the frame
+            out.write(processed_frame_bgr)
+        
+        # Release resources
+        video.release()
+        out.release()
+        
+        # If audio is needed, use moviepy to add it back
+        if audio and original_audio is not None:
+            # Load the processed video without audio
+            processed_clip = VideoFileClip(temp_output)
+            
+            # Add audio
+            processed_clip = processed_clip.set_audio(original_audio)
+            
+            # Write the final output with audio
+            processed_clip.write_videofile(output_path, codec='libx264', audio_codec='aac')
+            
+            # Close the clip
+            processed_clip.close()
+        else:
+            # Just copy the temp file if no audio is needed
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            
+            # Use OpenCV to copy the file with proper encoding
+            video = cv2.VideoCapture(temp_output)
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+            
+            while True:
+                ret, frame = video.read()
+                if not ret:
+                    break
+                out.write(frame)
+                
+            video.release()
+            out.release()
+            
+        # Clean up the temp file if it still exists
+        if os.path.exists(temp_output):
+            os.remove(temp_output)
+    
     except Exception as e:
+        # Clean up temp files
+        if temp_output and os.path.exists(temp_output):
+            os.remove(temp_output)
         raise Exception(f"Error processing video: {str(e)}")
 
 # VHS Effect
