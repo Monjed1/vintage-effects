@@ -14,19 +14,37 @@ def process_video_frames(input_path, output_path, process_frame_func, audio=True
         # Load the video
         clip = VideoFileClip(input_path)
         
-        # Create a wrapper function that only takes the frame argument
-        def process_frame(frame):
-            return process_frame_func(frame, **kwargs)
+        # Extract all frames first, then process them
+        # This avoids any issues with how iter_frames passes arguments
+        all_frames = []
+        duration = clip.duration
+        fps = clip.fps
+        total_frames = int(duration * fps)
         
-        # Process each frame manually instead of using fl_image
-        frames = []
-        for frame in clip.iter_frames():
-            processed_frame = process_frame(frame)
-            frames.append(processed_frame)
+        # Extract frames at specific timestamps
+        for i in range(total_frames):
+            timestamp = i / fps
+            if timestamp <= duration:
+                frame = clip.get_frame(timestamp)
+                all_frames.append(frame)
+        
+        # Process frames separately
+        processed_frames = []
+        for frame in all_frames:
+            try:
+                # Apply the effect with explicit keyword arguments
+                processed_frame = process_frame_func(frame, **kwargs)
+                processed_frames.append(processed_frame)
+            except Exception as e:
+                # Try without kwargs if that fails
+                try:
+                    processed_frame = process_frame_func(frame)
+                    processed_frames.append(processed_frame)
+                except Exception as inner_e:
+                    raise Exception(f"Error processing frame: {str(inner_e)}")
         
         # Create a new clip from processed frames
-        fps = clip.fps
-        processed_clip = ImageSequenceClip(frames, fps=fps)
+        processed_clip = ImageSequenceClip(processed_frames, fps=fps)
         
         # Write the result to the output file
         if audio and clip.audio is not None:
