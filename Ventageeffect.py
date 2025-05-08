@@ -14,8 +14,15 @@ def process_video_frames(input_path, output_path, process_frame_func, audio=True
         # Load the video
         clip = VideoFileClip(input_path)
         
-        # Process each frame with the provided function
-        processed_clip = clip.fl_image(lambda img: process_frame_func(img, **kwargs))
+        # Process each frame manually instead of using fl_image
+        frames = []
+        for frame in clip.iter_frames():
+            processed_frame = process_frame_func(frame, **kwargs)
+            frames.append(processed_frame)
+        
+        # Create a new clip from processed frames
+        fps = clip.fps
+        processed_clip = ImageSequenceClip(frames, fps=fps)
         
         # Write the result to the output file
         if audio and clip.audio is not None:
