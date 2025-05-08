@@ -14,10 +14,14 @@ def process_video_frames(input_path, output_path, process_frame_func, audio=True
         # Load the video
         clip = VideoFileClip(input_path)
         
+        # Create a wrapper function that only takes the frame argument
+        def process_frame(frame):
+            return process_frame_func(frame, **kwargs)
+        
         # Process each frame manually instead of using fl_image
         frames = []
         for frame in clip.iter_frames():
-            processed_frame = process_frame_func(frame, **kwargs)
+            processed_frame = process_frame(frame)
             frames.append(processed_frame)
         
         # Create a new clip from processed frames
