@@ -24,7 +24,7 @@ def process_video_frames(input_path, output_path, process_frame_func, audio=True
             except Exception as e:
                 print(f"Warning: Could not extract audio: {str(e)}")
         
-        # Load video with OpenCV for frame extraction
+        # Load video with OpenCV for frame extraction sd
         video = cv2.VideoCapture(input_path)
         
         if not video.isOpened():
