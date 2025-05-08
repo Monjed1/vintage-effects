@@ -8,8 +8,8 @@ import shutil
 import glob
 import uuid
 import requests
-from werkzeug.utils import secure_filename
 from urllib.parse import urlparse
+import werkzeug.serving
 from effects import (
     apply_vhs_effect, 
     apply_crt_scanlines, 
@@ -25,13 +25,15 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload
 app.secret_key = os.urandom(24)  # For session management
 
-# Configuration
 UPLOAD_FOLDER = 'temp_videos'
-PROCESSED_FOLDER = 'processed_videos'  # Folder to store processed videos
-PUBLIC_URL_BASE = os.environ.get('PUBLIC_URL_BASE', 'http://localhost:5556')  # Base URL for accessing processed videos
-
+OUTPUT_FOLDER = 'output_videos'  # For storing output videos that will be served
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(PROCESSED_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+# Server configuration
+SERVER_HOST = os.environ.get('SERVER_HOST', '0.0.0.0')
+SERVER_PORT = int(os.environ.get('SERVER_PORT', 5557))
+SERVER_BASE_URL = os.environ.get('SERVER_BASE_URL', f'http://{SERVER_HOST}:{SERVER_PORT}')
 
 # Helper function to safely delete a file
 def safe_delete(file_path):
@@ -58,30 +60,20 @@ def clean_previous_outputs():
     except Exception as e:
         print(f"Error cleaning previous outputs: {str(e)}")
 
-# Helper function to download a video from a URL
-def download_video(url):
+# Helper function to download a video from URL
+def download_video(url, output_path):
     try:
-        # Create a temporary file to download the video
-        video_id = uuid.uuid4().hex
-        temp_path = os.path.join(UPLOAD_FOLDER, f"download_{video_id}.mp4")
-        
-        # Download the video
         response = requests.get(url, stream=True)
-        response.raise_for_status()  # Raise an exception for HTTP errors
+        response.raise_for_status()  # Check if the request was successful
         
-        with open(temp_path, 'wb') as f:
+        with open(output_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
         
-        return temp_path
+        return True
     except Exception as e:
-        print(f"Error downloading video: {str(e)}")
-        raise e
-
-# Create URL for a processed video
-def create_video_url(filename):
-    # Create a public URL for the processed video
-    return f"{PUBLIC_URL_BASE}/video/{filename}"
+        print(f"Error downloading video from {url}: {str(e)}")
+        return False
 
 @app.route('/')
 def index():
@@ -103,159 +95,6 @@ def list_effects():
     }
     return jsonify(effects)
 
-# Route to serve processed videos
-@app.route('/video/<filename>')
-def serve_video(filename):
-    """Serve a processed video"""
-    return send_file(os.path.join(PROCESSED_FOLDER, filename))
-
-@app.route('/api/url/apply-effect', methods=['POST'])
-def apply_effect_url():
-    """Apply selected effect to a video from a URL"""
-    # Clean previous output files when a new process starts
-    clean_previous_outputs()
-    
-    data = request.json
-    if not data or 'video_url' not in data:
-        return jsonify({'error': 'No video URL provided in the request JSON'}), 400
-    
-    video_url = data['video_url']
-    effect_name = data.get('effect', 'vhs')
-    intensity = float(data.get('intensity', 0.5))
-    
-    try:
-        # Download the video
-        temp_input = download_video(video_url)
-        
-        # Generate a unique output filename
-        output_filename = f"{effect_name}_{uuid.uuid4().hex}.mp4"
-        temp_output = os.path.join(UPLOAD_FOLDER, f"output_{uuid.uuid4().hex}.mp4")
-        final_output = os.path.join(PROCESSED_FOLDER, output_filename)
-        
-        # Apply the requested effect
-        if effect_name == 'vhs':
-            apply_vhs_effect(temp_input, temp_output, intensity)
-        elif effect_name == 'crt':
-            apply_crt_scanlines(temp_input, temp_output, intensity)
-        elif effect_name == 'film_grain':
-            apply_film_grain(temp_input, temp_output, intensity)
-        elif effect_name == 'old_movie':
-            apply_old_movie(temp_input, temp_output, intensity)
-        elif effect_name == 'light_leak':
-            apply_light_leak(temp_input, temp_output, intensity)
-        elif effect_name == 'sepia':
-            apply_sepia(temp_input, temp_output, intensity)
-        elif effect_name == 'glitch':
-            apply_glitch(temp_input, temp_output, intensity)
-        elif effect_name == 'vintage_color':
-            apply_vintage_color(temp_input, temp_output, intensity)
-        else:
-            return jsonify({'error': f'Unknown effect: {effect_name}'}), 400
-        
-        # Move the output file to the processed folder
-        shutil.move(temp_output, final_output)
-        
-        # Return the URL of the processed video
-        video_url = create_video_url(output_filename)
-        
-        return jsonify({
-            'success': True,
-            'message': f'Successfully applied {effect_name} effect',
-            'video_url': video_url
-        })
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    
-    finally:
-        # Clean up temp files
-        safe_delete(temp_input)
-
-@app.route('/api/url/combine-effects', methods=['POST'])
-def combine_effects_url():
-    """Apply multiple effects in sequence to a video from a URL"""
-    # Clean previous output files when a new process starts
-    clean_previous_outputs()
-    
-    data = request.json
-    if not data or 'video_url' not in data:
-        return jsonify({'error': 'No video URL provided in the request JSON'}), 400
-    
-    video_url = data['video_url']
-    effects = data.get('effects', [])
-    
-    if not effects:
-        return jsonify({'error': 'No effects specified'}), 400
-    
-    try:
-        # Download the video
-        temp_input = download_video(video_url)
-        current_file = temp_input
-        
-        for i, effect_data in enumerate(effects):
-            # Extract effect name and intensity
-            if isinstance(effect_data, dict):
-                effect_name = effect_data.get('name')
-                intensity = float(effect_data.get('intensity', 0.5))
-            elif isinstance(effect_data, str):
-                parts = effect_data.split(':')
-                effect_name = parts[0]
-                intensity = float(parts[1]) if len(parts) > 1 else 0.5
-            else:
-                return jsonify({'error': 'Invalid effect format'}), 400
-            
-            temp_output = os.path.join(UPLOAD_FOLDER, f"step_{i}_{uuid.uuid4().hex}.mp4")
-            
-            # Apply the current effect
-            if effect_name == 'vhs':
-                apply_vhs_effect(current_file, temp_output, intensity)
-            elif effect_name == 'crt':
-                apply_crt_scanlines(current_file, temp_output, intensity)
-            elif effect_name == 'film_grain':
-                apply_film_grain(current_file, temp_output, intensity)
-            elif effect_name == 'old_movie':
-                apply_old_movie(current_file, temp_output, intensity)
-            elif effect_name == 'light_leak':
-                apply_light_leak(current_file, temp_output, intensity)
-            elif effect_name == 'sepia':
-                apply_sepia(current_file, temp_output, intensity)
-            elif effect_name == 'glitch':
-                apply_glitch(current_file, temp_output, intensity)
-            elif effect_name == 'vintage_color':
-                apply_vintage_color(current_file, temp_output, intensity)
-            else:
-                return jsonify({'error': f'Unknown effect: {effect_name}'}), 400
-            
-            # Cleanup previous step if not the original
-            if current_file != temp_input:
-                safe_delete(current_file)
-                
-            current_file = temp_output
-        
-        # Create final output file
-        output_filename = f"combined_{uuid.uuid4().hex}.mp4"
-        final_output = os.path.join(PROCESSED_FOLDER, output_filename)
-        
-        # Move the processed file to the final location
-        shutil.move(current_file, final_output)
-        
-        # Return the URL of the processed video
-        video_url = create_video_url(output_filename)
-        
-        return jsonify({
-            'success': True,
-            'message': 'Successfully applied combined effects',
-            'video_url': video_url
-        })
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    
-    finally:
-        # Clean up the original temp file
-        safe_delete(temp_input)
-
-# Keeping the original file upload endpoints for backward compatibility
 @app.route('/api/apply-effect', methods=['POST'])
 def apply_effect():
     """Apply selected effect to uploaded video"""
@@ -377,6 +216,171 @@ def combine_effects():
         safe_delete(temp_input)
         # Other temp files are cleaned up during processing
 
+# New API endpoints that work with URLs instead of file uploads
+@app.route('/api/url/apply-effect', methods=['POST'])
+def apply_effect_url():
+    """Apply an effect to a video URL and return a URL to the processed video"""
+    data = request.json
+    if not data or 'video_url' not in data:
+        return jsonify({'error': 'No video URL provided in JSON body'}), 400
+    
+    video_url = data.get('video_url')
+    effect_name = data.get('effect', 'vhs')
+    intensity = float(data.get('intensity', 0.5))
+    
+    # Create unique filenames
+    video_id = str(uuid.uuid4())
+    temp_input = os.path.join(UPLOAD_FOLDER, f"input_{video_id}.mp4")
+    
+    # Generate a recognizable output filename
+    output_filename = f"{effect_name}_{video_id}.mp4"
+    temp_output = os.path.join(UPLOAD_FOLDER, output_filename)
+    final_output = os.path.join(OUTPUT_FOLDER, output_filename)
+    
+    try:
+        # Download the video
+        if not download_video(video_url, temp_input):
+            return jsonify({'error': 'Failed to download video from URL'}), 400
+        
+        # Apply the requested effect
+        if effect_name == 'vhs':
+            apply_vhs_effect(temp_input, temp_output, intensity)
+        elif effect_name == 'crt':
+            apply_crt_scanlines(temp_input, temp_output, intensity)
+        elif effect_name == 'film_grain':
+            apply_film_grain(temp_input, temp_output, intensity)
+        elif effect_name == 'old_movie':
+            apply_old_movie(temp_input, temp_output, intensity)
+        elif effect_name == 'light_leak':
+            apply_light_leak(temp_input, temp_output, intensity)
+        elif effect_name == 'sepia':
+            apply_sepia(temp_input, temp_output, intensity)
+        elif effect_name == 'glitch':
+            apply_glitch(temp_input, temp_output, intensity)
+        elif effect_name == 'vintage_color':
+            apply_vintage_color(temp_input, temp_output, intensity)
+        else:
+            return jsonify({'error': f'Unknown effect: {effect_name}'}), 400
+        
+        # Move the output to the served directory
+        shutil.copy2(temp_output, final_output)
+        
+        # Generate a publicly accessible URL
+        output_url = f"{SERVER_BASE_URL}/videos/{output_filename}"
+        
+        return jsonify({
+            'success': True,
+            'video_url': output_url,
+            'effect': effect_name,
+            'intensity': intensity
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+    finally:
+        # Clean up temp files
+        safe_delete(temp_input)
+        safe_delete(temp_output)
+
+@app.route('/api/url/combine-effects', methods=['POST'])
+def combine_effects_url():
+    """Apply multiple effects to a video URL and return a URL to the processed video"""
+    data = request.json
+    if not data or 'video_url' not in data:
+        return jsonify({'error': 'No video URL provided in JSON body'}), 400
+    
+    video_url = data.get('video_url')
+    effects = data.get('effects', [])
+    
+    if not effects:
+        return jsonify({'error': 'No effects specified'}), 400
+    
+    # Create unique filenames
+    video_id = str(uuid.uuid4())
+    temp_input = os.path.join(UPLOAD_FOLDER, f"input_{video_id}.mp4")
+    
+    # Generate a recognizable output filename
+    output_filename = f"combined_{video_id}.mp4"
+    final_output = os.path.join(OUTPUT_FOLDER, output_filename)
+    
+    try:
+        # Download the video
+        if not download_video(video_url, temp_input):
+            return jsonify({'error': 'Failed to download video from URL'}), 400
+        
+        current_file = temp_input
+        
+        # Process each effect in sequence
+        for i, effect_data in enumerate(effects):
+            # Handle both string format and dictionary format
+            if isinstance(effect_data, str):
+                effect_name, intensity = effect_data.split(':') if ':' in effect_data else (effect_data, 0.5)
+                intensity = float(intensity)
+            else:
+                effect_name = effect_data.get('name', 'vhs')
+                intensity = float(effect_data.get('intensity', 0.5))
+            
+            temp_output = os.path.join(UPLOAD_FOLDER, f"step_{i}_{video_id}.mp4")
+            
+            # Apply the current effect
+            if effect_name == 'vhs':
+                apply_vhs_effect(current_file, temp_output, intensity)
+            elif effect_name == 'crt':
+                apply_crt_scanlines(current_file, temp_output, intensity)
+            elif effect_name == 'film_grain':
+                apply_film_grain(current_file, temp_output, intensity)
+            elif effect_name == 'old_movie':
+                apply_old_movie(current_file, temp_output, intensity)
+            elif effect_name == 'light_leak':
+                apply_light_leak(current_file, temp_output, intensity)
+            elif effect_name == 'sepia':
+                apply_sepia(current_file, temp_output, intensity)
+            elif effect_name == 'glitch':
+                apply_glitch(current_file, temp_output, intensity)
+            elif effect_name == 'vintage_color':
+                apply_vintage_color(current_file, temp_output, intensity)
+            else:
+                return jsonify({'error': f'Unknown effect: {effect_name}'}), 400
+            
+            # Cleanup previous step if not the original
+            if current_file != temp_input:
+                safe_delete(current_file)
+                
+            current_file = temp_output
+        
+        # Move the final output to the served directory
+        shutil.copy2(current_file, final_output)
+        
+        # Generate a publicly accessible URL
+        output_url = f"{SERVER_BASE_URL}/videos/{output_filename}"
+        
+        return jsonify({
+            'success': True,
+            'video_url': output_url,
+            'effects': effects
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+    finally:
+        # Clean up temp files
+        safe_delete(temp_input)
+        # Clean up any intermediate files
+        for i in range(len(effects)):
+            safe_delete(os.path.join(UPLOAD_FOLDER, f"step_{i}_{video_id}.mp4"))
+
+# Route to serve processed videos by URL
+@app.route('/videos/<filename>')
+def serve_video(filename):
+    """Serve a processed video file"""
+    video_path = os.path.join(OUTPUT_FOLDER, filename)
+    if not os.path.exists(video_path):
+        return jsonify({'error': 'Video not found'}), 404
+    
+    return send_file(video_path, mimetype='video/mp4')
+
 # Add a cleanup function to remove temporary files
 @app.after_request
 def cleanup_temp_files(response):
@@ -384,18 +388,12 @@ def cleanup_temp_files(response):
     try:
         # Find files older than 1 hour and delete them
         current_time = time.time()
-        for filename in os.listdir(UPLOAD_FOLDER):
-            file_path = os.path.join(UPLOAD_FOLDER, filename)
-            # If the file is older than 1 hour (3600 seconds)
-            if os.path.isfile(file_path) and os.path.getmtime(file_path) < current_time - 3600:
-                safe_delete(file_path)
-                
-        # Also clean up old processed videos (after 24 hours)
-        for filename in os.listdir(PROCESSED_FOLDER):
-            file_path = os.path.join(PROCESSED_FOLDER, filename)
-            # If the file is older than 24 hours
-            if os.path.isfile(file_path) and os.path.getmtime(file_path) < current_time - 86400:
-                safe_delete(file_path)
+        for folder in [UPLOAD_FOLDER, OUTPUT_FOLDER]:
+            for filename in os.listdir(folder):
+                file_path = os.path.join(folder, filename)
+                # If the file is older than 1 hour (3600 seconds)
+                if os.path.isfile(file_path) and os.path.getmtime(file_path) < current_time - 3600:
+                    safe_delete(file_path)
     except Exception as e:
         # Don't fail if cleanup doesn't work
         print(f"Error during cleanup: {str(e)}")
@@ -404,4 +402,7 @@ def cleanup_temp_files(response):
 if __name__ == '__main__':
     # Clean up any existing output files on startup
     clean_previous_outputs()
-    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5556))) 
+    
+    # Run the application on the specified port
+    print(f"Starting server on {SERVER_HOST}:{SERVER_PORT}")
+    app.run(debug=False, host=SERVER_HOST, port=SERVER_PORT) 

@@ -1,6 +1,6 @@
 # Vintage Video Effects API
 
-An API for applying vintage effects to videos, including VHS, film grain, CRT scanlines, and more.
+A Python API for applying various vintage video effects to uploaded videos. This project provides a REST API that can apply classic VHS, CRT, film grain, and other nostalgic effects to your videos.
 
 ## Features
 
@@ -8,27 +8,28 @@ An API for applying vintage effects to videos, including VHS, film grain, CRT sc
 - Combine multiple effects in sequence
 - Adjust effect intensity
 - Preserves original audio
-- URL-based API for easy integration
 
 ## Available Effects
 
-- VHS Glitch Overlay
-- CRT Scan Lines Effect
-- 8mm Film Grain Overlay
-- Old Movie Projector Effect
-- Vintage Light Leak Effect
-- Sepia Tone Effect
-- Digital Glitch Effect
-- Vintage Color Grading
+1. **VHS & CRT Effects**
+   - VHS Glitch Overlay
+   - CRT Scan Lines Effect
 
-## Getting Started
+2. **Film Grain & Vintage Movie Effects**
+   - 8mm Film Grain Overlay
+   - Old Movie Projector Effect
 
-### Prerequisites
+3. **Retro Color & Light Leaks**
+   - Light Leak Effect
+   - Sepia Tone Effect
 
-- Python 3.6+
-- Required libraries (see requirements.txt)
+4. **Glitch & Distortion Effects**
+   - Digital Glitch Effect
 
-### Installation
+5. **Vintage Color Grading**
+   - Vintage Color Effect
+
+## Installation
 
 1. Clone this repository:
 ```
@@ -46,54 +47,74 @@ pip install -r requirements.txt
 python app.py
 ```
 
-The API will be available at `http://localhost:5556`.
+The API will be available at `http://localhost:5000`.
 
 ## API Usage
 
-### URL-based API
+### List Available Effects
 
-Process a video from a URL and get back a URL to the processed video:
-
-```python
-import requests
-
-url = "http://localhost:5556/api/url/apply-effect"
-payload = {
-    "video_url": "https://example.com/video.mp4",
-    "effect": "vhs",
-    "intensity": 0.7
-}
-
-response = requests.post(url, json=payload)
-result = response.json()
-
-print(f"Processed video: {result['video_url']}")
+```
+GET /api/effects
 ```
 
-### File Upload API
+Returns a JSON object containing all available effects and their descriptions.
 
-Upload a video and download the processed result:
+### Apply an Effect
 
 ```
 POST /api/apply-effect
 ```
 
-Form parameters:
-- `video`: The video file
-- `effect`: Effect name (e.g., "vhs")
-- `intensity`: Effect strength (0.1-1.0)
+**Form parameters:**
+- `video`: The video file to process (multipart/form-data)
+- `effect`: The effect to apply (defaults to 'vhs' if not specified)
+- `intensity`: A value between 0.0 and 1.0 to control effect strength (defaults to 0.5)
 
-See the documentation for more details.
+**Example using curl:**
+```
+curl -F "video=@my_video.mp4" -F "effect=film_grain" -F "intensity=0.7" http://localhost:5000/api/apply-effect -o output.mp4
+```
 
-## Deployment
+### Apply Multiple Effects
 
-See [deployment_guide.md](deployment_guide.md) for instructions on deploying to a VPS.
+```
+POST /api/combine-effects
+```
+
+**Form parameters:**
+- `video`: The video file to process (multipart/form-data)
+- `effects`: A list of effects to apply in sequence (can be provided multiple times in the form)
+
+Each effect can include an intensity value by appending `:` followed by the intensity value.
+
+**Example using curl:**
+```
+curl -F "video=@my_video.mp4" -F "effects=vhs:0.7" -F "effects=film_grain:0.5" -F "effects=light_leak:0.3" http://localhost:5000/api/combine-effects -o combined_output.mp4
+```
+
+## Effect Details
+
+- **vhs**: VHS glitch overlay with RGB shift and noise
+- **crt**: CRT scan lines with screen curvature  
+- **film_grain**: 8mm film grain with dust and scratches
+- **old_movie**: Old movie projector effect with flicker and jitter
+- **light_leak**: Vintage light leak effect with warm tones
+- **sepia**: Sepia tone with subtle flickering
+- **glitch**: Digital glitch effect with artifacts and distortion
+- **vintage_color**: Vintage color grading with cross-processing
+
+## Examples
+
+Apply a VHS effect with high intensity:
+```
+curl -F "video=@my_video.mp4" -F "effect=vhs" -F "intensity=0.9" http://localhost:5000/api/apply-effect -o vhs_video.mp4
+```
+
+Create a retro film look by combining effects:
+```
+curl -F "video=@my_video.mp4" -F "effects=film_grain:0.7" -F "effects=old_movie:0.5" -F "effects=light_leak:0.3" http://localhost:5000/api/combine-effects -o retro_film.mp4
+```
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Built with Flask, OpenCV, and NumPy
-- Contributors welcome! 
+This project is licensed under the MIT License - see the LICENSE file for details. 
