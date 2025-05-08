@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  vintage-api:
+    build: .
+    container_name: vintage-api
+    restart: unless-stopped
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./processed_videos:/app/processed_videos
+    environment:
+      - PORT=5556
+      # Change this to your server's public URL when deploying
+      - PUBLIC_URL_BASE=http://localhost:5556
+    # Optional resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G 
